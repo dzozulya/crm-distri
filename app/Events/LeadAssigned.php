@@ -3,7 +3,7 @@
 namespace App\Events;
 
 
-use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 final class LeadAssigned

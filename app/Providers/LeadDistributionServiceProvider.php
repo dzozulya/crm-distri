@@ -29,7 +29,7 @@ class LeadDistributionServiceProvider extends ServiceProvider
     {
         Event::listen(
             LeadAssigned::class,
-            QueueLeadAssignedNotification::class,
+            [QueueLeadAssignedNotification::class, 'handle'],
         );
     }
 }

@@ -2,7 +2,7 @@
 
 namespace App\Listeners;
 use App\Events\LeadAssigned;
-
+use App\Jobs\SendLeadAssignedNotification;
 
 
 final class QueueLeadAssignedNotification
