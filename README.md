@@ -165,9 +165,6 @@ PONG
 
 Логи worker:
 
-```bash
-docker compose logs -f queue
-```
 
 ## Архітектура
 
