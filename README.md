@@ -77,9 +77,10 @@ REDIS_PORT=6379
 QUEUE_CONNECTION=redis
 ```
 
-Запустити контейнери:
+Збудувати  та запустити контейнери:
 
 ```bash
+docker compose build --no-cache
 docker compose up -d
 ```
 
