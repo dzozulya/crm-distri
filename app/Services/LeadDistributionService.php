@@ -1,55 +1,40 @@
 <?php
 
-
 namespace App\Services;
 
 use App\Domain\LeadDistribution\Contracts\DistributionStrategy;
-use App\Domain\ManagerLoad;
 use App\Enums\LeadStatus;
-use App\Models\Lead;
-use App\Models\LeadHistory;
-use App\Models\Manager;
-use App\Repositories\LeadRepository;
-use App\Repositories\ManagerRepository;
-use DB;
-use Illuminate\Support\Collection;
+use App\Repositories\Eloquent\LeadHistoryRepository;
+use App\Repositories\Eloquent\LeadRepository;
+use App\Repositories\Eloquent\ManagerRepository;
+
 use App\Events\LeadAssigned;
+use Illuminate\Support\Facades\DB;
 
-
-final class LeadDistributionService
+final readonly class LeadDistributionService
 {
     public function __construct(
-        private readonly DistributionStrategy $strategy,
-        private readonly LeadRepository       $leadRepository,
-        private readonly ManagerRepository    $managerRepository
-    )
-    {
-    }
-
-
-    private function getNewLeads(): Collection
-    {
-        return $this->leadRepository->getNewLeads();
-    }
-
-    private function getActiveManagerLoads(): Collection
-    {
-       return $this->managerRepository->getActiveManagerLoads();
+        private LeadRepository        $leadRepository,
+        private ManagerRepository     $managerRepository,
+        private LeadHistoryRepository $leadHistoryRepository,
+        private DistributionStrategy  $strategy,
+    ) {
     }
 
     /**
-     * @throws Throwable
+     * @throws \Throwable
      */
     public function distribute(): int
     {
         return DB::transaction(function (): int {
-            $leads = $this->getNewLeads();
+            $leads = $this->leadRepository->getNewLeads();
 
             if ($leads->isEmpty()) {
                 return 0;
             }
 
-            $managers = $this->getActiveManagerLoads();
+            $managers = $this->managerRepository
+                ->getActiveManagerLoads();
 
             if ($managers->isEmpty()) {
                 return 0;
@@ -61,44 +46,33 @@ final class LeadDistributionService
             );
 
             foreach ($leads as $lead) {
-                $this->assign(
+                $managerId = $assignments[$lead->id];
+
+                $oldManagerId = $lead->manager_id;
+                $oldStatus = $lead->status;
+
+                $this->leadRepository->assignToManager(
                     $lead,
-                    $assignments[$lead->id],
+                    $managerId,
+                );
+
+                $this->leadHistoryRepository->createAssignmentHistory(
+                    $lead,
+                    $oldManagerId,
+                    $managerId,
+                    $oldStatus,
+                    LeadStatus::IN_PROGRESS,
+                );
+
+                DB::afterCommit(
+                    fn () => LeadAssigned::dispatch(
+                        $lead->id,
+                        $managerId,
+                    )
                 );
             }
 
             return count($assignments);
         });
     }
-
-    private function assign(
-        Lead $lead,
-        int  $managerId,
-    ): void
-    {
-        $oldManagerId = $lead->manager_id;
-        $oldStatus = $lead->status;
-
-        $lead->update([
-            'manager_id' => $managerId,
-            'status' => LeadStatus::IN_PROGRESS,
-        ]);
-
-        LeadHistory::query()->create([
-            'lead_id' => $lead->id,
-            'old_manager_id' => $oldManagerId,
-            'new_manager_id' => $managerId,
-            'old_status' => $oldStatus,
-            'new_status' => LeadStatus::IN_PROGRESS,
-            'created_at' => now(),
-        ]);
-
-        DB::afterCommit(
-            fn() => LeadAssigned::dispatch(
-                $lead->id,
-                $managerId,
-            )
-        );
-    }
 }
-

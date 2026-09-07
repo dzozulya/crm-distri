@@ -1,58 +1,669 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# CRM Lead Distribution
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Тестове завдання для автоматичного розподілу лідів між активними менеджерами.
 
-## About Laravel
+## Стек
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- PHP 8.4
+- Laravel 11+
+- PostgreSQL 17
+- Redis 7
+- Docker Compose
+- PHPUnit / Pest
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Функціональність
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Реалізовано API:
 
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```http
+POST /api/leads/distribute
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Endpoint розподіляє всі нові (`NEW`) ліди між активними менеджерами.
 
-## Contributing
+Під час розподілу враховується поточне навантаження менеджера:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+- `NEW`
+- `IN_PROGRESS`
 
-## Code of Conduct
+Неактивні менеджери не беруть участі в розподілі.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Для кожного розподіленого ліда:
 
-## Security Vulnerabilities
+1. призначається менеджер;
+2. статус змінюється на `IN_PROGRESS`;
+3. створюється запис в історії;
+4. генерується `LeadAssigned`;
+5. listener ставить Job у Redis Queue;
+6. queue worker обробляє Job.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Повторний виклик API не обробляє вже розподілені ліди.
 
-## License
+## Запуск
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Клонувати репозиторій та перейти до його каталогу:
+
+```bash
+git clone <repository-url>
+cd <project-directory>
+```
+
+Створити `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Основні параметри:
+
+```dotenv
+APP_NAME=CRM
+APP_ENV=local
+APP_DEBUG=true
+APP_URL=http://localhost:8080
+
+DB_CONNECTION=pgsql
+DB_HOST=postgres
+DB_PORT=5432
+DB_DATABASE=crm
+DB_USERNAME=crm
+DB_PASSWORD=crm
+
+REDIS_CLIENT=phpredis
+REDIS_HOST=redis
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+
+QUEUE_CONNECTION=redis
+```
+
+Запустити контейнери:
+
+```bash
+docker compose up -d
+```
+
+Створити application key:
+
+```bash
+docker compose exec app php artisan key:generate
+```
+
+Запустити міграції та seed:
+
+```bash
+docker compose exec app php artisan migrate --seed
+```
+
+API буде доступний за адресою:
+
+```text
+http://localhost:8080
+```
+
+## Перевірка
+
+Перевірити список маршрутів:
+
+```bash
+docker compose exec app php artisan route:list
+```
+
+Очікуваний endpoint:
+
+```text
+POST  api/leads/distribute
+```
+
+Виклик API:
+
+```bash
+curl -X POST http://localhost:8080/api/leads/distribute
+```
+
+При успішному розподілі:
+
+```json
+{
+    "distributed": 9
+}
+```
+
+Якщо нових лідів немає або всі вони вже розподілені:
+
+```json
+{
+    "distributed": 0
+}
+```
+
+## Queue
+
+Queue worker запускається окремим Docker-контейнером:
+
+```yaml
+command: php artisan queue:work redis --sleep=3 --tries=3
+```
+
+Перевірити його стан:
+
+```bash
+docker compose ps
+```
+
+Перевірити Redis:
+
+```bash
+docker compose exec redis redis-cli ping
+```
+
+Очікувана відповідь:
+
+```text
+PONG
+```
+
+Логи worker:
+
+```bash
+docker compose logs -f queue
+```
+
+## Архітектура
+
+Основний flow:
+
+```text
+POST /api/leads/distribute
+            |
+            v
+LeadDistributionController
+            |
+            v
+LeadDistributionService
+            |
+            v
+DistributionStrategy
+            |
+            v
+LeastLoadedStrategy
+            |
+            v
+PostgreSQL transaction
+       /           \
+      v             v
+   Lead        LeadHistory
+      |
+      v
+LeadAssigned event
+      |
+      v
+QueueLeadAssignedNotification
+      |
+      v
+SendLeadAssignedNotification
+      |
+      v
+     Redis
+      |
+      v
+ queue worker
+```
+
+### Основні компоненти
+
+```text
+app/
+├── Domain/
+│   └── LeadDistribution/
+│       ├── Contracts/
+│       │   └── DistributionStrategy.php
+│       ├── Strategies/
+│       │   └── LeastLoadedStrategy.php
+│       └── ManagerLoad.php
+│
+├── Enums/
+│   └── LeadStatus.php
+│
+├── Events/
+│   └── LeadAssigned.php
+│
+├── Jobs/
+│   └── SendLeadAssignedNotification.php
+│
+├── Listeners/
+│   └── QueueLeadAssignedNotification.php
+│
+├── Http/
+│   ├── Controllers/
+│   │   └── LeadDistributionController.php
+│   └── Requests/
+│       └── DistributeLeadsRequest.php
+│
+├── Models/
+│   ├── Manager.php
+│   ├── Lead.php
+│   └── LeadHistory.php
+│
+├── Providers/
+│   └── LeadDistributionServiceProvider.php
+│
+└── Services/
+    └── LeadDistributionService.php
+```
+
+## Алгоритм розподілу
+
+Використовується алгоритм **Least Loaded**.
+
+Для кожного активного менеджера визначається поточне навантаження:
+
+```text
+load = NEW + IN_PROGRESS
+```
+
+Новий лід передається менеджеру з найменшим навантаженням.
+
+Після призначення ліда його навантаження збільшується в пам'яті алгоритму. Таким чином, наступний лід може бути призначений іншому менеджеру.
+
+Для однакового навантаження використовується `manager_id` як стабільний tie-breaker.
+
+Наприклад:
+
+```text
+Manager A = 12
+Manager B = 4
+Manager C = 8
+```
+
+При 9 нових лідах очікується:
+
+```text
+Manager A = 12
+Manager B = 11
+Manager C = 10
+```
+
+## Strategy Pattern
+
+Алгоритм розподілу винесений за інтерфейс:
+
+```php
+interface DistributionStrategy
+{
+    public function distribute(
+        Collection $managers,
+        Collection $leadIds,
+    ): array;
+}
+```
+
+Конкретна стратегія:
+
+```php
+LeastLoadedStrategy
+```
+
+`LeadDistributionService` залежить від абстракції `DistributionStrategy`, а не від конкретного алгоритму.
+
+Binding виконується у:
+
+```text
+app/Providers/LeadDistributionServiceProvider.php
+```
+
+```php
+$this->app->bind(
+    DistributionStrategy::class,
+    LeastLoadedStrategy::class,
+);
+```
+
+Тому для додавання, наприклад, `RoundRobinStrategy` достатньо створити нову реалізацію:
+
+```text
+app/Domain/LeadDistribution/Strategies/RoundRobinStrategy.php
+```
+
+і змінити binding:
+
+```php
+$this->app->bind(
+    DistributionStrategy::class,
+    RoundRobinStrategy::class,
+);
+```
+### Репозиторії
+
+Роботу з persistence layer винесено в окремі репозиторії:
+
+* `LeadRepository`
+* `ManagerRepository`
+* `LeadHistoryRepository`
+
+Сервіс розподілу лідів не працює з Eloquent безпосередньо. Він залежить від інтерфейсів репозиторіїв:
+
+```text
+LeadDistributionService
+        |
+        +-- LeadRepositoryInterface
+        +-- ManagerRepositoryInterface
+        +-- LeadHistoryRepositoryInterface
+        |
+        +-- DistributionStrategy
+```
+
+Конкретні реалізації репозиторіїв використовують Eloquent та реєструються в Laravel Container через Dependency Injection.
+
+Таке розділення дозволяє ізолювати persistence layer від бізнес-логіки та за необхідності замінити реалізацію репозиторію без зміни `LeadDistributionService`.
+
+Наприклад, `LeadRepositoryInterface` може бути реалізований не тільки через Eloquent, але й через інший ORM, raw SQL або зовнішнє джерело даних:
+
+```php
+$this->app->bind(
+    LeadRepositoryInterface::class,
+    LeadRepository::class,
+);
+```
+
+Таким чином, `LeadDistributionService` залежить від абстракції, а не від конкретної реалізації persistence layer, що відповідає принципу Dependency Inversion Principle.
+
+Репозиторії містять лише операції доступу та зміни даних. Правила розподілу лідів, вибір менеджера та алгоритм балансування залишаються у service/domain layer.
+
+
+Controller та `LeadDistributionService` при цьому не змінюються.
+
+Це дозволяє дотримуватися Strategy Pattern, Dependency Inversion Principle та Open/Closed Principle.
+
+## PostgreSQL та конкурентний доступ
+
+Для вибірки нових лідів використовується:
+
+```sql
+FOR UPDATE SKIP LOCKED
+```
+
+Це дозволяє уникати повторної обробки одних і тих самих лідів при паралельних запитах до endpoint.
+
+Основна операція розподілу виконується в PostgreSQL transaction.
+
+Зміна ліда та запис в `lead_histories` виконуються атомарно.
+
+Event створюється після успішного commit транзакції, щоб не відправляти подію для операції, яка була відкотилася.
+
+`SKIP LOCKED` не гарантує ідеально глобального балансування при великій кількості одночасних distributor-процесів. Для високого навантаження можливі додаткові механізми синхронізації, наприклад PostgreSQL advisory lock або централізована черга розподілу.
+
+Для поточного завдання використаний простіший варіант.
+
+## Індекси
+
+Для пошуку нерозподілених нових лідів створено partial index:
+
+```sql
+CREATE INDEX idx_leads_unassigned_new
+ON leads (id)
+WHERE status = 'NEW'
+  AND manager_id IS NULL;
+```
+
+Для підрахунку відкритих лідів менеджера:
+
+```sql
+CREATE INDEX idx_leads_manager_open
+ON leads (manager_id)
+WHERE status IN ('NEW', 'IN_PROGRESS');
+```
+
+Partial indexes зменшують обсяг індексованих даних та дозволяють PostgreSQL ефективніше виконувати запити, пов'язані з розподілом.
+
+## Історія
+
+Для кожної зміни під час автоматичного розподілу створюється запис у:
+
+```text
+lead_histories
+```
+
+Зберігаються:
+
+- lead;
+- попередній менеджер;
+- новий менеджер;
+- попередній статус;
+- новий статус;
+- timestamp зміни.
+
+Це дозволяє мати audit trail розподілу.
+
+## Raw SQL звіт
+
+Завдання також містить статистичний SQL-запит без використання ORM.
+
+Запит знаходиться у:
+
+```text
+database/sql/manager_statistics.sql
+```
+
+Він повертає:
+
+- менеджера;
+- кількість відкритих лідів;
+- середній час у роботі;
+- кількість завершених лідів за останні 30 днів.
+
+Запит використовує PostgreSQL `FILTER` та `EXTRACT`.
+
+### Обмеження розрахунку часу
+
+У поточній моделі немає окремих `started_at` та `completed_at`.
+
+Тому точний час перебування ліда в `IN_PROGRESS` неможливо визначити лише з `updated_at`.
+
+Поточний розрахунок є наближеним. Для production-рішення доцільно використовувати історію переходів статусів або окремі timestamps:
+
+```text
+started_at
+completed_at
+```
+
+## Тестування
+
+Запустити всі тести:
+
+```bash
+docker compose exec app php artisan test
+```
+
+
+
+Unit-тест не використовує базу даних, оскільки перевіряє чисту бізнес-логіку алгоритму.
+
+Feature-тести перевіряють інтеграцію з Laravel, базою даних, event та queue.
+
+
+## Повторний виклик
+
+Після успішного розподілу всі оброблені ліди мають:
+
+```text
+status = IN_PROGRESS
+manager_id IS NOT NULL
+```
+
+Тому повторний:
+
+```http
+POST /api/leads/distribute
+```
+
+не обробляє їх повторно.
+
+При відсутності нових лідів API повертає:
+
+```json
+{
+    "distributed": 0
+}
+```
+
+## Технічні рішення та trade-offs
+
+### Чому Eloquent використовується для основного domain flow
+
+Eloquent зручний для моделей, relationships та транзакційного application flow.
+
+При цьому вимога щодо SQL без ORM виконана окремим raw SQL-запитом для статистичного звіту.
+
+### Чому не використовується Redis для самого алгоритму
+
+Redis використовується як Queue backend.
+
+Поточний алгоритм отримує актуальне навантаження безпосередньо з PostgreSQL, що є source of truth для leads.
+
+Винесення counters у Redis може бути корисним при дуже високому навантаженні, але додає проблему синхронізації між Redis та PostgreSQL.
+
+### Чому немає складної мікросервісної інфраструктури
+
+Завдання виконується як Laravel application з окремим queue worker.
+
+Такий підхід достатній для поточного навантаження та залишає можливість подальшого горизонтального масштабування.
+
+## Docker
+
+Сервіси:
+
+```text
+app       Laravel + PHP-FPM
+nginx     HTTP server
+postgres  PostgreSQL
+redis     Redis
+queue     Laravel queue worker
+```
+
+Запуск:
+
+```bash
+docker compose up -d
+```
+
+Зупинка:
+
+```bash
+docker compose down
+```
+
+Перегляд контейнерів:
+
+```bash
+docker compose ps
+```
+
+Перегляд логів application:
+
+```bash
+docker compose logs -f app
+```
+
+Перегляд логів queue:
+
+```bash
+docker compose logs -f queue
+```
+
+## API приклад
+
+Request:
+
+```http
+POST /api/leads/distribute
+```
+
+Body не потрібен.
+
+Response:
+
+```json
+{
+    "distributed": 9
+}
+```
+
+## Postman
+
+Для ручної перевірки можна використовувати Postman або будь-який HTTP client.
+Postman коллекція знаходится в корні проекту
+```text
+crm-disribution.postman_collection.json
+```
+
+Request:
+
+```text
+POST http://localhost:8080/api/leads/distribute
+```
+
+Headers:
+
+```text
+Accept: application/json
+```
+
+Body:
+
+```text
+none
+```
+
+## Структура бази даних
+
+### managers
+
+```text
+id
+name
+is_active
+created_at
+updated_at
+```
+
+### leads
+
+```text
+id
+manager_id
+status
+created_at
+updated_at
+```
+
+### lead_histories
+
+```text
+id
+lead_id
+old_manager_id
+new_manager_id
+old_status
+new_status
+created_at
+```
+
+## Підсумок
+
+Рішення побудоване навколо окремого application service та Strategy Pattern.
+
+Основні властивості:
+
+- балансування за поточним навантаженням;
+- підтримка активних/неактивних менеджерів;
+- транзакційність;
+- захист від повторної обробки;
+- `FOR UPDATE SKIP LOCKED` для конкурентного доступу;
+- audit history;
+- Event + Listener + Queue Job;
+- Redis queue;
+- raw PostgreSQL SQL для статистики;
+- partial indexes;
+- unit та feature tests;
+- можливість додавання нових алгоритмів без зміни controller та business service.

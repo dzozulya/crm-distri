@@ -1,13 +1,14 @@
 <?php
 
-namespace App\Repositories;
+namespace App\Repositories\Eloquent;
 
 use App\Domain\ManagerLoad;
 use App\Enums\LeadStatus;
 use App\Models\Manager;
+use App\Repositories\Contracts\ManagerRepositoryInterface;
 use Illuminate\Support\Collection;
 
-class ManagerRepository
+class ManagerRepository implements ManagerRepositoryInterface
 {
     public function getActiveManagerLoads(): Collection
     {
