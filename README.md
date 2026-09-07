@@ -563,17 +563,6 @@ docker compose down
 docker compose ps
 ```
 
-Перегляд логів application:
-
-```bash
-docker compose logs -f app
-```
-
-Перегляд логів queue:
-
-```bash
-docker compose logs -f queue
-```
 
 ## API приклад
 
