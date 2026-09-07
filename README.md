@@ -84,6 +84,12 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
+Встановити залежності Composer
+
+````bash
+docker compose exec app composer install
+````
+
 Створити application key:
 
 ```bash
